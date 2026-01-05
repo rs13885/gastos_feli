@@ -40,14 +40,18 @@ module.exports = (Expense) => {
         try {
             const { date, category, item, amount, percentage } = req.body;
 
-            // Calculate proportional
-            const proportional = amount * percentage;
+            // Round amount to 2 decimal places
+            const roundedAmount = Math.round(amount * 100) / 100;
+
+            // Calculate proportional and round to 2 decimal places
+            const rawProportional = roundedAmount * percentage;
+            const proportional = Math.round(rawProportional * 100) / 100;
 
             const newExpense = await Expense.create({
                 date,
                 category,
                 item,
-                amount,
+                amount: roundedAmount,
                 percentage,
                 proportional
             });
@@ -92,14 +96,21 @@ module.exports = (Expense) => {
             // Actually, let's just construct the date string manually to be safe 'YYYY-MM-01'
             const targetDateStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`;
 
-            const newExpensesData = sourceExpenses.map(exp => ({
-                date: targetDateStr,
-                category: exp.category,
-                item: exp.item,
-                amount: exp.amount, // Keep same amount or user updates it? Usually keep same roughly.
-                percentage: exp.percentage,
-                proportional: exp.proportional // Recalculate if we changed logic, but here it's same
-            }));
+            const newExpensesData = sourceExpenses.map(exp => {
+                // Ensure rounded values on copy too, just in case
+                const roundedAmount = Math.round(exp.amount * 100) / 100;
+                const rawProportional = roundedAmount * exp.percentage;
+                const roundedProportional = Math.round(rawProportional * 100) / 100;
+
+                return {
+                    date: targetDateStr,
+                    category: exp.category,
+                    item: exp.item,
+                    amount: roundedAmount,
+                    percentage: exp.percentage,
+                    proportional: roundedProportional
+                };
+            });
 
             const createdExpenses = await Expense.bulkCreate(newExpensesData);
 
@@ -152,22 +163,23 @@ module.exports = (Expense) => {
             const expense = await Expense.findByPk(id);
             if (!expense) return res.status(404).json({ error: 'Expense not found' });
 
-            // Recalculate proportional if amount or percentage changed
-            let proportional = expense.proportional;
+            // Prepare update values
+            let updateValues = { date, category, item };
+
+            // Handle amount and percentage changes for proportional calculation
+            const currentAmount = amount !== undefined ? Math.round(amount * 100) / 100 : expense.amount;
+            const currentPercentage = percentage !== undefined ? percentage : expense.percentage;
+
+            if (amount !== undefined) updateValues.amount = currentAmount;
+            if (percentage !== undefined) updateValues.percentage = currentPercentage;
+
+            // Recalculate proportional if either amount or percentage changes
             if (amount !== undefined || percentage !== undefined) {
-                const newAmount = amount !== undefined ? amount : expense.amount;
-                const newPercent = percentage !== undefined ? percentage : expense.percentage;
-                proportional = newAmount * newPercent;
+                const rawProportional = currentAmount * currentPercentage;
+                updateValues.proportional = Math.round(rawProportional * 100) / 100;
             }
 
-            await expense.update({
-                date,
-                category,
-                item,
-                amount,
-                percentage,
-                proportional
-            });
+            await expense.update(updateValues);
 
             res.json(expense);
         } catch (error) {
