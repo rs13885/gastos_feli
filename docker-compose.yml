@@ -1,0 +1,18 @@
+services:
+  server:
+    build: ./server
+    container_name: gastos-server
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./expenses.db:/app/expenses.db
+    restart: always
+
+  client:
+    build: ./client
+    container_name: gastos-client
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    restart: always
