@@ -2,6 +2,8 @@ const express = require('express');
 const { Op } = require('sequelize');
 const router = express.Router();
 
+const roundToTwo = (num) => Math.round(num * 100) / 100;
+
 module.exports = (Expense) => {
 
     // Get all expenses (optional filtering by month/year)
@@ -41,11 +43,11 @@ module.exports = (Expense) => {
             const { date, category, item, amount, percentage } = req.body;
 
             // Round amount to 2 decimal places
-            const roundedAmount = Math.round(amount * 100) / 100;
+            const roundedAmount = roundToTwo(amount);
 
             // Calculate proportional and round to 2 decimal places
             const rawProportional = roundedAmount * percentage;
-            const proportional = Math.round(rawProportional * 100) / 100;
+            const proportional = roundToTwo(rawProportional);
 
             const newExpense = await Expense.create({
                 date,
@@ -98,9 +100,9 @@ module.exports = (Expense) => {
 
             const newExpensesData = sourceExpenses.map(exp => {
                 // Ensure rounded values on copy too, just in case
-                const roundedAmount = Math.round(exp.amount * 100) / 100;
+                const roundedAmount = roundToTwo(exp.amount);
                 const rawProportional = roundedAmount * exp.percentage;
-                const roundedProportional = Math.round(rawProportional * 100) / 100;
+                const roundedProportional = roundToTwo(rawProportional);
 
                 return {
                     date: targetDateStr,
@@ -167,7 +169,7 @@ module.exports = (Expense) => {
             let updateValues = { date, category, item };
 
             // Handle amount and percentage changes for proportional calculation
-            const currentAmount = amount !== undefined ? Math.round(amount * 100) / 100 : expense.amount;
+            const currentAmount = amount !== undefined ? roundToTwo(amount) : expense.amount;
             const currentPercentage = percentage !== undefined ? percentage : expense.percentage;
 
             if (amount !== undefined) updateValues.amount = currentAmount;
@@ -176,7 +178,7 @@ module.exports = (Expense) => {
             // Recalculate proportional if either amount or percentage changes
             if (amount !== undefined || percentage !== undefined) {
                 const rawProportional = currentAmount * currentPercentage;
-                updateValues.proportional = Math.round(rawProportional * 100) / 100;
+                updateValues.proportional = roundToTwo(rawProportional);
             }
 
             await expense.update(updateValues);
