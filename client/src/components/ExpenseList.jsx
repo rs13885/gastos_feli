@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Edit2, Trash2, TrendingUp, DollarSign } from 'lucide-react';
+import { Edit2, Trash2, DollarSign } from 'lucide-react';
 
 const ExpenseList = ({ expenses, onEdit, onDelete }) => {
 
