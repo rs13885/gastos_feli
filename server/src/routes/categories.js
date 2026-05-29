@@ -1,51 +1,54 @@
 const express = require('express');
 const router = express.Router();
+const db = require('../db');
 
-module.exports = (Category) => {
-    router.get('/', async (req, res) => {
-        try {
-            const categories = await Category.findAll({ order: [['name', 'ASC']] });
-            res.json(categories);
-        } catch (error) {
-            res.status(500).json({ error: 'Server error' });
-        }
-    });
+const now = () => new Date().toISOString();
 
-    router.post('/', async (req, res) => {
-        try {
-            const { name, percentage } = req.body;
-            const category = await Category.create({ name, percentage });
-            res.json(category);
-        } catch (error) {
-            if (error.name === 'SequelizeUniqueConstraintError') {
-                return res.status(400).json({ error: 'La categoría ya existe' });
-            }
-            res.status(500).json({ error: 'Error al crear categoría' });
-        }
-    });
+router.get('/', (req, res) => {
+  try {
+    res.json(db.prepare('SELECT * FROM categories ORDER BY name ASC').all());
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
-    router.put('/:id', async (req, res) => {
-        try {
-            const { id } = req.params;
-            const { name, percentage } = req.body;
-            const category = await Category.findByPk(id);
-            if (!category) return res.status(404).json({ error: 'Categoría no encontrada' });
-            await category.update({ name, percentage });
-            res.json(category);
-        } catch (error) {
-            res.status(500).json({ error: 'Error al actualizar categoría' });
-        }
-    });
+router.post('/', (req, res) => {
+  try {
+    const { name, percentage } = req.body;
+    const ts = now();
+    const { lastInsertRowid } = db.prepare(
+      'INSERT INTO categories (name, percentage, createdAt, updatedAt) VALUES (?, ?, ?, ?)'
+    ).run(name, percentage, ts, ts);
+    res.json(db.prepare('SELECT * FROM categories WHERE id = ?').get(lastInsertRowid));
+  } catch (e) {
+    if (e.message.includes('UNIQUE constraint failed')) {
+      return res.status(400).json({ error: 'La categoría ya existe' });
+    }
+    res.status(500).json({ error: 'Error al crear categoría' });
+  }
+});
 
-    router.delete('/:id', async (req, res) => {
-        try {
-            const { id } = req.params;
-            await Category.destroy({ where: { id } });
-            res.json({ message: 'Categoría eliminada' });
-        } catch (error) {
-            res.status(500).json({ error: 'Error al eliminar categoría' });
-        }
-    });
+router.put('/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, percentage } = req.body;
+    if (!db.prepare('SELECT id FROM categories WHERE id = ?').get(id)) {
+      return res.status(404).json({ error: 'Categoría no encontrada' });
+    }
+    db.prepare('UPDATE categories SET name=?, percentage=?, updatedAt=? WHERE id=?').run(name, percentage, now(), id);
+    res.json(db.prepare('SELECT * FROM categories WHERE id = ?').get(id));
+  } catch (e) {
+    res.status(500).json({ error: 'Error al actualizar categoría' });
+  }
+});
 
-    return router;
-};
+router.delete('/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM categories WHERE id = ?').run(req.params.id);
+    res.json({ message: 'Categoría eliminada' });
+  } catch (e) {
+    res.status(500).json({ error: 'Error al eliminar categoría' });
+  }
+});
+
+module.exports = router;

@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
-const { Sequelize } = require('sequelize');
 const path = require('path');
+
+require('./db'); // initialize DB + seed on startup
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,51 +10,12 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-const dbPath = path.join(__dirname, '../../expenses.db');
-const sequelize = new Sequelize({
-    dialect: 'sqlite',
-    storage: dbPath,
-    logging: false,
-});
+app.use('/expenses', require('./routes/expenses'));
+app.use('/categories', require('./routes/categories'));
 
-const Expense = require('./models/Expense')(sequelize);
-const Category = require('./models/Category')(sequelize);
+// Serve built React app
+const publicDir = path.join(__dirname, '../public');
+app.use(express.static(publicDir));
+app.use((req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
-const DEFAULT_CATEGORIES = [
-    { name: 'Vivienda', percentage: 0.25 },
-    { name: 'Salud', percentage: 0.70 },
-    { name: 'Educación', percentage: 0.70 },
-    { name: 'Alimentos', percentage: 0.25 },
-    { name: 'Otros', percentage: 0.70 },
-];
-
-(async () => {
-    try {
-        await sequelize.authenticate();
-        console.log('Database connected.');
-        await sequelize.sync({ alter: true });
-        console.log('Database synced.');
-
-        const count = await Category.count();
-        if (count === 0) {
-            await Category.bulkCreate(DEFAULT_CATEGORIES);
-            console.log('Default categories seeded.');
-        }
-    } catch (error) {
-        console.error('Unable to connect to the database:', error);
-    }
-})();
-
-const expensesRoutes = require('./routes/expenses')(Expense);
-const categoriesRoutes = require('./routes/categories')(Category);
-
-app.use('/expenses', expensesRoutes);
-app.use('/categories', categoriesRoutes);
-
-app.get('/', (req, res) => {
-    res.send('Shared Expenses API Running');
-});
-
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));

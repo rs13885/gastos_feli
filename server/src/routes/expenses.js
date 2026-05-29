@@ -1,206 +1,125 @@
 const express = require('express');
-const { Op } = require('sequelize');
 const router = express.Router();
+const db = require('../db');
 
-const roundToTwo = (num) => Math.round(num * 100) / 100;
+const round2 = (n) => Math.round(n * 100) / 100;
+const now = () => new Date().toISOString();
 
-module.exports = (Expense) => {
+router.get('/', (req, res) => {
+  try {
+    const { month, year } = req.query;
+    if (month && year) {
+      const m = String(month).padStart(2, '0');
+      const start = `${year}-${m}-01`;
+      const end = `${year}-${m}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+      return res.json(db.prepare(
+        'SELECT * FROM expenses WHERE date BETWEEN ? AND ? ORDER BY date ASC, category ASC'
+      ).all(start, end));
+    }
+    res.json(db.prepare('SELECT * FROM expenses ORDER BY date ASC, category ASC').all());
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
-    // Get all expenses (optional filtering by month/year)
-    router.get('/', async (req, res) => {
-        try {
-            const { month, year } = req.query; // Expects month (1-12) and year (e.g., 2024)
+router.post('/', (req, res) => {
+  try {
+    const { date, category, item, amount, percentage } = req.body;
+    const amt = round2(amount);
+    const prop = round2(amt * percentage);
+    const ts = now();
+    const { lastInsertRowid } = db.prepare(
+      'INSERT INTO expenses (date, category, item, amount, percentage, proportional, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(date, category, item, amt, percentage, prop, ts, ts);
+    res.json(db.prepare('SELECT * FROM expenses WHERE id = ?').get(lastInsertRowid));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error creating expense' });
+  }
+});
 
-            let where = {};
-            if (month && year) {
-                const startDate = new Date(year, month - 1, 1);
-                const endDate = new Date(year, month, 0); // Last day of the month
+router.post('/copy', (req, res) => {
+  try {
+    const { sourceMonth, sourceYear, targetMonth, targetYear } = req.body;
+    if (!sourceMonth || !sourceYear || !targetMonth || !targetYear) {
+      return res.status(400).json({ error: 'Missing source or target date parameters' });
+    }
+    const sm = String(sourceMonth).padStart(2, '0');
+    const start = `${sourceYear}-${sm}-01`;
+    const end = `${sourceYear}-${sm}-${String(new Date(sourceYear, sourceMonth, 0).getDate()).padStart(2, '0')}`;
+    const targetDate = `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`;
 
-                // Format for SQLite/Sequelize DATEONLY comparison can be tricky, 
-                // but checking string range usually works for YYYY-MM-DD
-                const startStr = startDate.toISOString().split('T')[0];
-                const endStr = endDate.toISOString().split('T')[0];
+    const source = db.prepare('SELECT * FROM expenses WHERE date BETWEEN ? AND ?').all(start, end);
+    if (!source.length) return res.json({ message: 'No expenses found to copy', count: 0 });
 
-                where.date = {
-                    [Op.between]: [startStr, endStr]
-                };
-            }
+    const ins = db.prepare(
+      'INSERT INTO expenses (date, category, item, amount, percentage, proportional, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    const ts = now();
+    db.transaction(() => {
+      for (const e of source) {
+        const amt = round2(e.amount);
+        ins.run(targetDate, e.category, e.item, amt, e.percentage, round2(amt * e.percentage), ts, ts);
+      }
+    })();
 
-            const expenses = await Expense.findAll({
-                where,
-                order: [['date', 'ASC'], ['category', 'ASC']]
-            });
-            res.json(expenses);
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: 'Server error' });
-        }
-    });
+    res.json({ message: 'Expenses copied successfully', count: source.length });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error copying expenses' });
+  }
+});
 
-    // Add a new expense
-    router.post('/', async (req, res) => {
-        try {
-            const { date, category, item, amount, percentage } = req.body;
+router.delete('/month', (req, res) => {
+  try {
+    const { month, year } = req.query;
+    if (!month || !year) return res.status(400).json({ error: 'Missing month/year' });
+    const m = String(parseInt(month, 10)).padStart(2, '0');
+    const y = parseInt(year, 10);
+    const start = `${y}-${m}-01`;
+    const end = `${y}-${m}-${String(new Date(y, month, 0).getDate()).padStart(2, '0')}`;
+    const { changes } = db.prepare('DELETE FROM expenses WHERE date BETWEEN ? AND ?').run(start, end);
+    res.json({ message: 'Month cleared', count: changes });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error clearing month' });
+  }
+});
 
-            // Round amount to 2 decimal places
-            const roundedAmount = roundToTwo(amount);
+router.put('/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Expense not found' });
 
-            // Calculate proportional and round to 2 decimal places
-            const rawProportional = roundedAmount * percentage;
-            const proportional = roundToTwo(rawProportional);
+    const { date, category, item, amount, percentage } = req.body;
+    const amt = amount !== undefined ? round2(amount) : existing.amount;
+    const pct = percentage !== undefined ? percentage : existing.percentage;
 
-            const newExpense = await Expense.create({
-                date,
-                category,
-                item,
-                amount: roundedAmount,
-                percentage,
-                proportional
-            });
+    db.prepare(
+      'UPDATE expenses SET date=?, category=?, item=?, amount=?, percentage=?, proportional=?, updatedAt=? WHERE id=?'
+    ).run(
+      date ?? existing.date,
+      category ?? existing.category,
+      item ?? existing.item,
+      amt, pct, round2(amt * pct), now(), id
+    );
+    res.json(db.prepare('SELECT * FROM expenses WHERE id = ?').get(id));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error updating expense' });
+  }
+});
 
-            res.json(newExpense);
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: 'Error creating expense' });
-        }
-    });
+router.delete('/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM expenses WHERE id = ?').run(req.params.id);
+    res.json({ message: 'Expense deleted' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error deleting expense' });
+  }
+});
 
-    // Copy expenses from one month to another
-    router.post('/copy', async (req, res) => {
-        try {
-            const { sourceMonth, sourceYear, targetMonth, targetYear } = req.body;
-
-            if (!sourceMonth || !sourceYear || !targetMonth || !targetYear) {
-                return res.status(400).json({ error: 'Missing source or target date parameters' });
-            }
-
-            // Find source expenses
-            const startDate = new Date(sourceYear, sourceMonth - 1, 1);
-            const endDate = new Date(sourceYear, sourceMonth, 0);
-            const startStr = startDate.toISOString().split('T')[0];
-            const endStr = endDate.toISOString().split('T')[0];
-
-            const sourceExpenses = await Expense.findAll({
-                where: {
-                    date: {
-                        [Op.between]: [startStr, endStr]
-                    }
-                }
-            });
-
-            if (sourceExpenses.length === 0) {
-                return res.json({ message: 'No expenses found to copy', count: 0 });
-            }
-
-            // Create new expenses for target month
-            // We'll set the date to the 1st of the target month by default
-            // Adjust formatting to YYYY-MM-DD
-            // Actually, let's just construct the date string manually to be safe 'YYYY-MM-01'
-            const targetDateStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`;
-
-            const newExpensesData = sourceExpenses.map(exp => {
-                // Ensure rounded values on copy too, just in case
-                const roundedAmount = roundToTwo(exp.amount);
-                const rawProportional = roundedAmount * exp.percentage;
-                const roundedProportional = roundToTwo(rawProportional);
-
-                return {
-                    date: targetDateStr,
-                    category: exp.category,
-                    item: exp.item,
-                    amount: roundedAmount,
-                    percentage: exp.percentage,
-                    proportional: roundedProportional
-                };
-            });
-
-            const createdExpenses = await Expense.bulkCreate(newExpensesData);
-
-            res.json({ message: 'Expenses copied successfully', count: createdExpenses.length });
-
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: 'Error copying expenses' });
-        }
-    });
-
-    // Clear all expenses for a specific month
-    router.delete('/month', async (req, res) => {
-        try {
-            const { month, year } = req.query;
-            if (!month || !year) return res.status(400).json({ error: 'Missing month/year' });
-
-            const m = parseInt(month, 10);
-            const y = parseInt(year, 10);
-
-            const startDateStr = `${y}-${String(m).padStart(2, '0')}-01`;
-            const lastDay = new Date(y, m, 0).getDate();
-            const endDateStr = `${y}-${String(m).padStart(2, '0')}-${lastDay}`;
-
-            console.log(`Clearing month ${month}/${year}. Range: ${startDateStr} to ${endDateStr}`);
-
-            const deleted = await Expense.destroy({
-                where: {
-                    date: {
-                        [Op.between]: [startDateStr, endDateStr]
-                    }
-                }
-            });
-
-            console.log(`Deleted ${deleted} records.`);
-
-            res.json({ message: 'Month cleared', count: deleted });
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: 'Error clearing month' });
-        }
-    });
-
-    // Update an expense
-    router.put('/:id', async (req, res) => {
-        try {
-            const { id } = req.params;
-            const { date, category, item, amount, percentage } = req.body;
-
-            const expense = await Expense.findByPk(id);
-            if (!expense) return res.status(404).json({ error: 'Expense not found' });
-
-            // Prepare update values
-            let updateValues = { date, category, item };
-
-            // Handle amount and percentage changes for proportional calculation
-            const currentAmount = amount !== undefined ? roundToTwo(amount) : expense.amount;
-            const currentPercentage = percentage !== undefined ? percentage : expense.percentage;
-
-            if (amount !== undefined) updateValues.amount = currentAmount;
-            if (percentage !== undefined) updateValues.percentage = currentPercentage;
-
-            // Recalculate proportional if either amount or percentage changes
-            if (amount !== undefined || percentage !== undefined) {
-                const rawProportional = currentAmount * currentPercentage;
-                updateValues.proportional = roundToTwo(rawProportional);
-            }
-
-            await expense.update(updateValues);
-
-            res.json(expense);
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: 'Error updating expense' });
-        }
-    });
-
-    // Delete an expense
-    router.delete('/:id', async (req, res) => {
-        try {
-            const { id } = req.params;
-            await Expense.destroy({ where: { id } });
-            res.json({ message: 'Expense deleted' });
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: 'Error deleting expense' });
-        }
-    });
-
-    return router;
-};
+module.exports = router;

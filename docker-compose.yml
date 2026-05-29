@@ -1,21 +1,13 @@
 services:
   server:
-    build: ./server
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: gastos-server
     ports:
       - "3000:3000"
     volumes:
       - ./expenses.db:/app/expenses.db
-    restart: always
-
-  client:
-    build: ./client
-    container_name: gastos-client
-# Removing ports to allow Caddy handle HTTPS
-#    ports:
-#      - "80:80"
-    depends_on:
-      - server
     restart: always
 
   caddy:
@@ -28,9 +20,7 @@ services:
     volumes:
       - caddy_data:/data
       - caddy_config:/config
-    environment:
-      - DOMAIN:gastosfeli.marrau.ar
-    command: caddy reverse-proxy --from https://gastosfeli.marrau.ar --to gastos-client:80
+    command: caddy reverse-proxy --from https://gastosfeli.marrau.ar --to gastos-server:3000
 
 volumes:
   caddy_data:
