@@ -9,6 +9,7 @@ const Home = ({
     expenses,
     loading,
     currentDate,
+    categories,
     onSave,
     onDelete,
     onCopyMonth,
@@ -75,6 +76,7 @@ const Home = ({
                         initialData={editingExpense}
                         onCancel={handleCancel}
                         currentMonthDate={currentDate}
+                        categories={categories}
                     />
                 </div>
             )}

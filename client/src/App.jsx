@@ -3,21 +3,27 @@ import axios from 'axios';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { format, subMonths, addMonths } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, PieChart, Home as HomeIcon, BarChart3 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, PieChart, Home as HomeIcon, BarChart3, Settings } from 'lucide-react';
 
 import Home from './pages/Home';
 import Reports from './pages/Reports';
+import SettingsPage from './pages/Settings';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 function App() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [expenses, setExpenses] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetchExpenses();
   }, [currentDate]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
 
   const fetchExpenses = async () => {
     setLoading(true);
@@ -30,6 +36,15 @@ function App() {
       console.error('Error fetching expenses:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/categories`);
+      setCategories(res.data);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
     }
   };
 
@@ -100,7 +115,6 @@ function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-gray-50/50 pb-20">
-        {/* Header */}
         <header className="bg-white border-b border-gray-200 sticky top-0 z-30 bg-opacity-80 backdrop-blur-md">
           <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -126,6 +140,13 @@ function App() {
               >
                 <BarChart3 size={16} />
                 <span className="hidden sm:inline">Reportes</span>
+              </NavLink>
+              <NavLink
+                to="/settings"
+                className={({ isActive }) => `flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${isActive ? 'bg-white text-pink-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                <Settings size={16} />
+                <span className="hidden sm:inline">Config</span>
               </NavLink>
             </div>
 
@@ -156,6 +177,7 @@ function App() {
                 expenses={expenses}
                 loading={loading}
                 currentDate={currentDate}
+                categories={categories}
                 onSave={handleSaveExpense}
                 onDelete={handleDeleteExpense}
                 onCopyMonth={handleCopyMonth}
@@ -164,6 +186,9 @@ function App() {
             } />
             <Route path="/reports" element={
               <Reports expenses={expenses} />
+            } />
+            <Route path="/settings" element={
+              <SettingsPage onCategoriesChange={fetchCategories} />
             } />
           </Routes>
         </main>

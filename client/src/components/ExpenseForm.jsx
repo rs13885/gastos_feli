@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Save, X } from 'lucide-react';
 
-const CATEGORIES = ['Vivienda', 'Salud', 'Educación', 'Alimentos', 'Otros'];
+const DEFAULT_PERCENTAGE = 0.70;
 
-const ExpenseForm = ({ onSave, initialData = null, onCancel, currentMonthDate }) => {
+const ExpenseForm = ({ onSave, initialData = null, onCancel, currentMonthDate, categories = [] }) => {
     const [formData, setFormData] = useState({
-        date: initialData?.date || currentMonthDate ? new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth(), 1).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-        category: 'Vivienda',
-        item: '',
-        amount: '',
-        percentage: 0.5,
+        date: initialData?.date || (currentMonthDate
+            ? new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth(), 1).toISOString().split('T')[0]
+            : new Date().toISOString().split('T')[0]),
+        category: initialData?.category || '',
+        item: initialData?.item || '',
+        amount: initialData?.amount || '',
+        percentage: initialData?.percentage ?? DEFAULT_PERCENTAGE,
     });
 
     useEffect(() => {
@@ -18,17 +20,40 @@ const ExpenseForm = ({ onSave, initialData = null, onCancel, currentMonthDate })
                 ...initialData,
                 date: initialData.date,
                 amount: initialData.amount,
-                percentage: initialData.percentage
+                percentage: initialData.percentage,
             });
         }
     }, [initialData]);
 
-    const handleChange = (e) => {
-        const { name, value } = e.target;
+    // When categories load and we're creating a new expense, seed the percentage for the initial category
+    useEffect(() => {
+        if (!initialData && categories.length > 0 && formData.category) {
+            const match = categories.find(c => c.name === formData.category);
+            if (match) setFormData(prev => ({ ...prev, percentage: match.percentage }));
+        }
+    }, [categories]);
+
+    const handleCategoryChange = (e) => {
+        const value = e.target.value;
+        const match = categories.find(c => c.name === value);
         setFormData(prev => ({
             ...prev,
-            [name]: value
+            category: value,
+            ...(match ? { percentage: match.percentage } : !initialData && !prev._percentageManuallySet ? { percentage: DEFAULT_PERCENTAGE } : {}),
         }));
+    };
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        if (name === 'percentage') {
+            setFormData(prev => ({ ...prev, percentage: parseFloat(value) / 100 || 0 }));
+        } else {
+            setFormData(prev => ({ ...prev, [name]: value }));
+        }
+    };
+
+    const handlePercentageChange = (e) => {
+        setFormData(prev => ({ ...prev, percentage: parseFloat(e.target.value) / 100 || 0 }));
     };
 
     const handleSubmit = (e) => {
@@ -36,15 +61,15 @@ const ExpenseForm = ({ onSave, initialData = null, onCancel, currentMonthDate })
         onSave({
             ...formData,
             amount: parseFloat(formData.amount),
-            percentage: parseFloat(formData.percentage),
+            percentage: formData.percentage,
         });
-        // Reset if not editing
         if (!initialData) {
-            setFormData(prev => ({ ...prev, item: '', amount: '' }));
+            setFormData(prev => ({ ...prev, item: '', amount: '', category: '', percentage: DEFAULT_PERCENTAGE }));
         }
     };
 
-    const proportional = (parseFloat(formData.amount) || 0) * (parseFloat(formData.percentage) || 0);
+    const proportional = (parseFloat(formData.amount) || 0) * formData.percentage;
+    const percentageDisplay = Math.round(formData.percentage * 100);
 
     return (
         <div className="bg-white/80 backdrop-blur-md rounded-2xl shadow-xl border border-white/20 p-6 mb-8 transition-all duration-300 hover:shadow-2xl">
@@ -62,30 +87,27 @@ const ExpenseForm = ({ onSave, initialData = null, onCancel, currentMonthDate })
             <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-
-
-                    {/* Category */}
+                    {/* Category combo box */}
                     <div className="space-y-1">
                         <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Categoría</label>
-                        <div className="relative">
-                            <select
-                                name="category"
-                                value={formData.category}
-                                onChange={handleChange}
-                                className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all outline-none appearance-none text-gray-800 font-medium cursor-pointer"
-                            >
-                                {CATEGORIES.map(cat => (
-                                    <option key={cat} value={cat}>{cat}</option>
-                                ))}
-                            </select>
-                            <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
-                                <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                            </div>
-                        </div>
+                        <input
+                            list="categories-list"
+                            name="category"
+                            required
+                            placeholder="Seleccionar o escribir..."
+                            value={formData.category}
+                            onChange={handleCategoryChange}
+                            className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all outline-none text-gray-800 font-medium"
+                        />
+                        <datalist id="categories-list">
+                            {categories.map(cat => (
+                                <option key={cat.id} value={cat.name} />
+                            ))}
+                        </datalist>
                     </div>
 
                     {/* Item */}
-                    <div className="col-span-1 md:col-span-2 space-y-1">
+                    <div className="space-y-1">
                         <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Item / Descripción</label>
                         <input
                             type="text"
@@ -118,24 +140,27 @@ const ExpenseForm = ({ onSave, initialData = null, onCancel, currentMonthDate })
 
                     {/* Percentage */}
                     <div className="space-y-1">
-                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Porcentaje (Ej. 0.5)</label>
-                        <input
-                            type="number"
-                            name="percentage"
-                            required
-                            step="0.01"
-                            max="1"
-                            min="-1"
-                            value={formData.percentage}
-                            onChange={handleChange}
-                            className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all outline-none text-gray-800 font-medium"
-                        />
+                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Tu Porcentaje</label>
+                        <div className="relative">
+                            <input
+                                type="number"
+                                name="percentage"
+                                required
+                                step="1"
+                                max="100"
+                                min="-100"
+                                value={percentageDisplay}
+                                onChange={handlePercentageChange}
+                                className="w-full pl-4 pr-10 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all outline-none text-gray-800 font-medium"
+                            />
+                            <span className="absolute right-3 top-2 text-gray-400 font-medium">%</span>
+                        </div>
                     </div>
                 </div>
 
                 {/* Live Preview */}
                 <div className="mt-6 p-4 bg-gradient-to-br from-pink-50 to-purple-50 rounded-xl border border-pink-100 flex justify-between items-center">
-                    <span className="text-sm text-pink-700 font-medium">Proporcional (Preview)</span>
+                    <span className="text-sm text-pink-700 font-medium">Tu parte (Preview)</span>
                     <span className="text-2xl font-black text-pink-600 tracking-tight">
                         ${proportional.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
