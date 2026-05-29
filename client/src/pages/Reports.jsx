@@ -1,170 +1,178 @@
 import React, { useMemo, useEffect, useState } from 'react';
 import axios from 'axios';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { Download } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const COLORS = ['#be185d', '#db2777', '#f472b6', '#fbcfe8', '#831843', '#500724'];
 
-const CustomTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-        return (
-            <div className="bg-white p-3 border border-gray-100 shadow-lg rounded-xl">
-                <p className="font-bold text-gray-800">{payload[0].name}</p>
-                <p className="text-pink-600 font-medium">
-                    ${payload[0].value.toLocaleString('es-AR')}
-                </p>
-            </div>
-        );
-    }
-    return null;
+const fmt = (val) =>
+  `$${val.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
+const downloadCSV = (expenses, filename) => {
+  const BOM = '﻿';
+  const headers = ['Fecha', 'Categoría', 'Item', 'Monto', 'Porcentaje (%)', 'Tu Parte'];
+  const rows = expenses.map(e => [
+    e.date,
+    e.category,
+    e.item,
+    e.amount.toFixed(2),
+    Math.round(e.percentage * 100),
+    e.proportional.toFixed(2),
+  ]);
+  const csv = BOM + [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 };
 
 const Reports = ({ expenses }) => {
-    const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState([]);
 
-    useEffect(() => {
-        axios.get(`${API_URL}/expenses`)
-            .then(res => setHistory(res.data))
-            .catch(err => console.error(err));
-    }, []);
+  useEffect(() => {
+    axios.get(`${API_URL}/expenses`).then(r => setHistory(r.data)).catch(console.error);
+  }, []);
 
-    // Current Month Data
-    const categoryData = useMemo(() => {
-        const data = {};
-        expenses.forEach(exp => {
-            if (!data[exp.category]) {
-                data[exp.category] = { name: exp.category, value: 0, proportional: 0 };
-            }
-            data[exp.category].value += exp.amount;
-            data[exp.category].proportional += exp.proportional;
-        });
-        return Object.values(data).sort((a, b) => b.value - a.value);
-    }, [expenses]);
+  const categoryData = useMemo(() => {
+    const map = {};
+    expenses.forEach(e => {
+      if (!map[e.category]) map[e.category] = { name: e.category, amount: 0, proportional: 0 };
+      map[e.category].amount += e.amount;
+      map[e.category].proportional += e.proportional;
+    });
+    return Object.values(map).sort((a, b) => b.amount - a.amount);
+  }, [expenses]);
 
-    const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
-    const maxCategory = categoryData.length > 0 ? categoryData[0] : null;
+  const totalAmount = expenses.reduce((s, e) => s + e.amount, 0);
+  const totalProportional = expenses.reduce((s, e) => s + e.proportional, 0);
 
-    // Historical Stats
-    const historyStats = useMemo(() => {
-        if (!history.length) return { total: 0, average: 0, months: 0 };
+  const historyStats = useMemo(() => {
+    if (!history.length) return { total: 0, proportional: 0, average: 0, months: 0 };
+    const total = history.reduce((s, e) => s + e.amount, 0);
+    const proportional = history.reduce((s, e) => s + e.proportional, 0);
+    const months = new Set(history.map(e => e.date.substring(0, 7))).size;
+    return { total, proportional, average: months > 0 ? total / months : 0, months };
+  }, [history]);
 
-        const total = history.reduce((sum, e) => sum + e.amount, 0);
+  return (
+    <div className="space-y-8 animate-fade-in-up">
 
-        // Count unique months
-        const uniqueMonths = new Set(history.map(e => e.date.substring(0, 7))).size; // YYYY-MM
-        const average = uniqueMonths > 0 ? total / uniqueMonths : 0;
-
-        return { total, average, months: uniqueMonths };
-    }, [history]);
-
-    const formatCurrency = (val) => `$${val.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-
-    return (
-        <div className="space-y-8 animate-fade-in-up">
-
-            {/* Historical Cards Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
-                    <div className="absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-pink-50 to-transparent pointer-events-none"></div>
-                    <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2 z-10 relative">Gasto Histórico Total</h3>
-                    <div className="relative z-10">
-                        <p className="text-3xl font-bold text-gray-800">{formatCurrency(historyStats.total)}</p>
-                        <p className="text-xs text-gray-400 mt-1">Acumulado en {historyStats.months} meses registrados</p>
-                    </div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
-                    <div className="absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-purple-50 to-transparent pointer-events-none"></div>
-                    <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2 z-10 relative">Promedio Mensual</h3>
-                    <div className="relative z-10">
-                        <p className="text-3xl font-bold text-gray-800">{formatCurrency(historyStats.average)}</p>
-                        <p className="text-xs text-gray-400 mt-1">Promedio de gasto por mes</p>
-                    </div>
-                </div>
-            </div>
-
-            <div className="border-t border-gray-200 my-6"></div>
-
-            <h2 className="text-lg font-semibold text-gray-700">Reporte del Mes Seleccionado</h2>
-
-            {expenses.length === 0 ? (
-                <div className="text-center py-20 bg-white/50 rounded-2xl border border-dashed border-gray-300">
-                    <p className="text-gray-500 font-medium">No hay datos para el mes seleccionado.</p>
-                </div>
-            ) : (
-                <>
-                    {/* Monthly Cards Row */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                            <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2">Categoría Top (Mes)</h3>
-                            {maxCategory ? (
-                                <div>
-                                    <p className="text-2xl font-bold text-gray-800">{maxCategory.name}</p>
-                                    <p className="text-pink-600 font-medium">{formatCurrency(maxCategory.value)}</p>
-                                    <p className="text-xs text-gray-400 mt-1">{((maxCategory.value / totalAmount) * 100).toFixed(1)}% del total mensual</p>
-                                </div>
-                            ) : <p>-</p>}
-                        </div>
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                            <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2">Total del Mes</h3>
-                            <div>
-                                <p className="text-2xl font-bold text-gray-800">{formatCurrency(totalAmount)}</p>
-                                <p className="text-gray-500 font-medium text-sm mt-1">{expenses.length} gastos registrados</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        {/* Pie Chart */}
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 min-h-[400px] flex flex-col items-center">
-                            <h3 className="text-lg font-bold text-gray-800 mb-2 w-full text-left">Distribución por Categoría</h3>
-                            <div className="flex-1 w-full h-[350px] relative">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <PieChart>
-                                        <Pie
-                                            data={categoryData}
-                                            cx="50%"
-                                            cy="50%"
-                                            innerRadius={80}
-                                            outerRadius={110}
-                                            paddingAngle={5}
-                                            dataKey="value"
-                                        >
-                                            {categoryData.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="none" />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip content={<CustomTooltip />} />
-                                        <Legend wrapperStyle={{ paddingTop: "20px" }} />
-                                    </PieChart>
-                                </ResponsiveContainer>
-                            </div>
-                        </div>
-
-                        {/* Info Panel / Summary List */}
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 min-h-[400px]">
-                            <h3 className="text-lg font-bold text-gray-800 mb-6">Detalle por Categoría</h3>
-                            <div className="space-y-4">
-                                {categoryData.map((cat, idx) => (
-                                    <div key={idx} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition-colors group">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
-                                            <span className="font-medium text-gray-700">{cat.name}</span>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="font-bold text-gray-800">{formatCurrency(cat.value)}</p>
-                                            <p className="text-xs text-gray-400 group-hover:text-gray-500">
-                                                {((cat.value / totalAmount) * 100).toFixed(1)}%
-                                            </p>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                </>
-            )}
+      {/* Historical stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2">Gasto Histórico Total</h3>
+          <p className="text-3xl font-bold text-gray-800">{fmt(historyStats.total)}</p>
+          <p className="text-xs text-gray-400 mt-1">{historyStats.months} meses registrados</p>
         </div>
-    );
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2">Promedio Mensual</h3>
+          <p className="text-3xl font-bold text-gray-800">{fmt(historyStats.average)}</p>
+          <p className="text-xs text-gray-400 mt-1">Gasto total por mes</p>
+        </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between">
+          <div>
+            <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2">Tu Parte Histórica</h3>
+            <p className="text-3xl font-bold text-pink-600">{fmt(historyStats.proportional)}</p>
+          </div>
+          {history.length > 0 && (
+            <button
+              onClick={() => downloadCSV(history, 'gastos-historial.csv')}
+              className="mt-4 flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-pink-600 transition-colors"
+            >
+              <Download size={13} />
+              Descargar historial completo
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="border-t border-gray-200" />
+
+      {/* Month section header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-700">Mes Seleccionado</h2>
+        {expenses.length > 0 && (
+          <button
+            onClick={() => downloadCSV(expenses, 'gastos-mes.csv')}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pink-700 bg-pink-50 hover:bg-pink-100 rounded-xl transition-colors"
+          >
+            <Download size={15} />
+            Descargar CSV
+          </button>
+        )}
+      </div>
+
+      {expenses.length === 0 ? (
+        <div className="text-center py-20 bg-white/50 rounded-2xl border border-dashed border-gray-300">
+          <p className="text-gray-500 font-medium">No hay datos para el mes seleccionado.</p>
+        </div>
+      ) : (
+        <>
+          {/* Monthly summary cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2">Categoría Top</h3>
+              <p className="text-2xl font-bold text-gray-800">{categoryData[0]?.name}</p>
+              <p className="text-pink-600 font-medium text-sm mt-1">{fmt(categoryData[0]?.amount ?? 0)}</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2">Total del Mes</h3>
+              <p className="text-2xl font-bold text-gray-800">{fmt(totalAmount)}</p>
+              <p className="text-xs text-gray-400 mt-1">{expenses.length} gastos registrados</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2">Tu Parte del Mes</h3>
+              <p className="text-2xl font-bold text-pink-600">{fmt(totalProportional)}</p>
+            </div>
+          </div>
+
+          {/* Category breakdown table */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="bg-gray-50 px-6 py-3 border-b border-gray-100">
+              <h3 className="font-bold text-gray-700 text-sm uppercase tracking-wider">Desglose por Categoría</h3>
+            </div>
+            <table className="w-full">
+              <thead>
+                <tr className="text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
+                  <th className="px-6 py-3 text-left">Categoría</th>
+                  <th className="px-6 py-3 text-right">Total</th>
+                  <th className="px-6 py-3 text-right hidden sm:table-cell">% del mes</th>
+                  <th className="px-6 py-3 text-right">Tu Parte</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {categoryData.map(cat => (
+                  <tr key={cat.name} className="hover:bg-pink-50/30 transition-colors">
+                    <td className="px-6 py-4 font-medium text-gray-800">
+                      <span className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-pink-400 flex-shrink-0" />
+                        {cat.name}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right text-gray-600 font-medium">{fmt(cat.amount)}</td>
+                    <td className="px-6 py-4 text-right text-gray-400 text-sm hidden sm:table-cell">
+                      {totalAmount > 0 ? ((cat.amount / totalAmount) * 100).toFixed(1) : 0}%
+                    </td>
+                    <td className="px-6 py-4 text-right font-bold text-pink-600">{fmt(cat.proportional)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-gray-200 bg-gray-50">
+                  <td className="px-6 py-4 font-bold text-gray-700">Total</td>
+                  <td className="px-6 py-4 text-right font-bold text-gray-800">{fmt(totalAmount)}</td>
+                  <td className="hidden sm:table-cell" />
+                  <td className="px-6 py-4 text-right font-black text-pink-600">{fmt(totalProportional)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
 };
 
 export default Reports;
